@@ -808,7 +808,12 @@ get_extra :: (extras: GLTF_Extras, name: string, $T: Type) -> bool, T
 			[] string
 		];
 		is_supported: bool;
-		for SUPPORTED_TYPES if T == it is_supported = true;
+		for SUPPORTED_TYPES {
+			if T == it {
+				is_supported = true;
+				break;
+			}
+		}
 		assert(is_supported, "Type % is an unsupported type for get_extra\nSupported types:\n%\n", T, SUPPORTED_TYPES);
 	}
 
