@@ -253,6 +253,7 @@ gltf_parse_string :: (gltf_buffer: string) -> GLTF_Data {
     defer array_add(*data.meshes, mesh);
 
     mesh.name = get_string(mesh_parsed, "name");
+	mesh.extras = cast(*void, get_object(mesh_parsed, "extras"));
 
     primitives := get_array(mesh_parsed, "primitives");
     for prim_parsed: primitives {
@@ -279,6 +280,19 @@ gltf_parse_string :: (gltf_buffer: string) -> GLTF_Data {
       primitive.texcoord_0_accessor = get_int(attributes, "TEXCOORD_0", -1);
       primitive.texcoord_1_accessor = get_int(attributes, "TEXCOORD_1", -1);
       primitive.texcoord_2_accessor = get_int(attributes, "TEXCOORD_2", -1);
+
+      targets, has_targets := get_array(prim_parsed, "targets");
+      if has_targets {
+      	for target_parsed: targets {
+      		morph: GLTF_Morph_Target;
+
+      		morph.position_accessor = get_int(target_parsed, "POSITION", -1);
+      		morph.normal_accessor = get_int(target_parsed, "NORMAL", -1);
+      		morph.tangent_accessor = get_int(target_parsed, "TANGENT", -1);
+
+      		array_add(*primitive.morph_targets, morph);
+      	}
+      }
     }
   }
 
@@ -766,8 +780,106 @@ read_buffer_from_accessor :: (gltf_data: *GLTF_Data, accessor: GLTF_Accessor, li
   }
 }
 
+// Arrays allocate memory
+get_extra :: (mesh: GLTF_Mesh, name: string, $T: Type) -> bool, T
+{
+	#run {
+		SUPPORTED_TYPES :: Type.[
+			float,
+			float64,
+			bool,
+			string,
+			[] float,
+			[] float64,
+			[] bool,
+			[] string
+		];
+		is_supported: bool;
+		for SUPPORTED_TYPES if T == it is_supported = true;
+		assert(is_supported, "Type % is an unsupported type for get_extra\nSupported types:\n%\n", T, SUPPORTED_TYPES);
+	}
 
+	extra: T;
+	if !mesh.extras return false, extra;
 
+	extra_json: JSON_Value;
+	success: bool;
+
+	extras_object := cast(*Table(string, JSON_Value), mesh.extras);
+	success, extra_json = table_find(extras_object, name);
+	if !success return false, extra;
+
+	if extra_json.type == {
+		case .NULL;
+			return false, extra;
+		case .OBJECT;
+			return false, extra;
+	}
+
+	#if T == {
+		case float;
+			if extra_json.type != .NUMBER return false, extra;
+			extra = get_as(extra_json, float);
+		case float64;
+			if extra_json.type != .NUMBER return false, extra;
+			extra = get_as(extra_json, float64);
+		case bool;
+			if extra_json.type != .BOOLEAN return false, extra;
+			extra = get_as(extra_json, bool);
+		case string;
+			if extra_json.type != .STRING return false, extra;
+			extra = get_as(extra_json, string);
+		// Maybe I can do some Type_Info and Type_Info_Array checking here
+		// but just doing a resizable call and setting it back to the result
+		// looks more concise?
+		case [] float;
+			if extra_json.type != .ARRAY return false, extra;
+			json_arr := get_as(extra_json, [] JSON_Value);
+			if json_arr.count < 1 || json_arr[0].type != .NUMBER
+				return false, extra;
+			arr := resizable(extra);
+			array_reserve(*arr, json_arr.count);
+			for json_arr {
+				array_add(*arr, cast(float, it.number));
+			}
+			extra = arr;
+		case [] float64;
+			if extra_json.type != .ARRAY return false, extra;
+			json_arr := get_as(extra_json, [] JSON_Value);
+			if json_arr.count < 1 || json_arr[0].type != .NUMBER
+				return false, extra;
+			arr := resizable(extra);
+			array_reserve(*arr, json_arr.count);
+			for json_arr {
+				array_add(*arr, it.number);
+			}
+			extra = arr;
+		case [] bool;
+			if extra_json.type != .ARRAY return false, extra;
+			json_arr := get_as(extra_json, [] JSON_Value);
+			if json_arr.count < 1 || json_arr[0].type != .BOOLEAN
+				return false, extra;
+			arr := resizable(extra);
+			array_reserve(*arr, json_arr.count);
+			for json_arr {
+				array_add(*arr, it.boolean);
+			}
+			extra = arr;
+		case [] string;
+			if extra_json.type != .ARRAY return false, extra;
+			json_arr := get_as(extra_json, [] JSON_Value);
+			if json_arr.count < 1 || json_arr[0].type != .STRING
+				return false, extra;
+			arr := resizable(extra);
+			array_reserve(*arr, json_arr.count);
+			for json_arr {
+				array_add(*arr, it.str);
+			}
+			extra = arr;
+	}
+
+	return success, extra;
+}
 
 /*
  *
@@ -1211,6 +1323,8 @@ GLTF_Primitive :: struct {
   indices_accessor := -1;
   // The index of the material to apply to this primitive when rendering.
   material := -1;
+
+  morph_targets: [..] GLTF_Morph_Target;
 }
 
 // A set of primitives to be rendered.
@@ -1220,6 +1334,8 @@ GLTF_Mesh :: struct {
   name : string;
   // An array of primitives, each defining geometry to be rendered.
   primitives : [..] GLTF_Primitive;
+  // An opaque pointer to an array of JSON values.
+  extras : GLTF_Extras;
 }
 
 // Metadata about the glTF asset.
@@ -1325,6 +1441,15 @@ GLTF_Light_Spot :: struct {
   // Angle in radians from centre of spotlight where falloff ends.
   outer_cone_angle := PI / 4;
 }
+
+GLTF_Morph_Target :: struct {
+	name: string;
+	position_accessor := -1;
+	normal_accessor := -1;
+	tangent_accessor := -1;
+}
+
+GLTF_Extras :: *void;
 
 #scope_file;
 
@@ -1586,6 +1711,11 @@ get_string :: (json_val: JSON_Value, key: string) -> string {
   return copy_string(str);
 }
 
+get_object :: (json_val: JSON_Value, key: string) -> *JSON_Object {
+	val := get(json_val, key, .OBJECT);
+	return val.object;
+}
+
 get :: (json_val     : JSON_Value,
         key          : string,
         expected_type: JSON_Type) -> JSON_Value, bool {
@@ -1593,7 +1723,7 @@ get :: (json_val     : JSON_Value,
   assert(json_val.type == .OBJECT);
 
   table := json_val.object;
-  val, success := table_find(table, key);
+  success, val := table_find(table, key);
 
   // Default value when value was not found.
   if !success {
