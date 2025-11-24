@@ -70,6 +70,7 @@ gltf_parse_string :: (gltf_buffer: string) -> GLTF_Data {
     node.skin   = get_int(node_parsed, "skin", -1);
     node.mesh   = get_int(node_parsed, "mesh", -1);
     node.camera = get_int(node_parsed, "camera", -1);
+    node.extras = cast(*void, get_object(node_parsed, "extras"));
 
     matrix, has_matrix := get_array(node_parsed, "matrix");
     if has_matrix {
@@ -119,6 +120,7 @@ gltf_parse_string :: (gltf_buffer: string) -> GLTF_Data {
 
     buffer.byte_length = get_int(buffer_parsed, "byteLength");
     buffer.uri         = get_string(buffer_parsed, "uri");
+    buffer.extras = cast(*void, get_object(buffer_parsed, "extras"));
   }
 
 
@@ -138,6 +140,7 @@ gltf_parse_string :: (gltf_buffer: string) -> GLTF_Data {
     buffer_view.buffer      = get_int(buffer_view_parsed, "buffer", -1);
     buffer_view.byte_length = get_int(buffer_view_parsed, "byteLength");
     buffer_view.byte_offset = get_int(buffer_view_parsed, "byteOffset");
+    buffer_view.extras = cast(*void, get_object(buffer_view_parsed, "extras"));
 
     stride, has_stride := get_int(buffer_view_parsed, "byteStride");
     if has_stride {
@@ -163,6 +166,7 @@ gltf_parse_string :: (gltf_buffer: string) -> GLTF_Data {
     accessor.buffer_view = get_int(accessor_parsed, "bufferView", -1);
     accessor.byte_offset = get_int(accessor_parsed, "byteOffset");
     accessor.count       = get_int(accessor_parsed, "count");
+    accessor.extras   = cast(*void, get_object(accessor_parsed, "extras"));
 
     comp_type := get_int(accessor_parsed, "componentType");
     accessor.component_type = cast(GLTF_Component_Type) comp_type;
@@ -216,6 +220,7 @@ gltf_parse_string :: (gltf_buffer: string) -> GLTF_Data {
     defer array_add(*data.scenes, scene);
 
     scene.name = get_string(scene_parsed, "name");
+    scene.extras   = cast(*void, get_object(scene_parsed, "extras"));
 
     nodes := get_array(scene_parsed, "nodes");
     for nodes array_add(*scene.nodes, parse_int(it));
@@ -233,6 +238,7 @@ gltf_parse_string :: (gltf_buffer: string) -> GLTF_Data {
     defer array_add(*data.skins, skin);
 
     skin.name = get_string(it, "name");
+	skin.extras = cast(*void, get_object(it, "extras"));
 
     skin.skeleton = get_int(it, "skeleton", -1);
     skin.inverse_bind_matrices = get_int(it, "inverseBindMatrices", -1);
@@ -281,16 +287,18 @@ gltf_parse_string :: (gltf_buffer: string) -> GLTF_Data {
       primitive.texcoord_1_accessor = get_int(attributes, "TEXCOORD_1", -1);
       primitive.texcoord_2_accessor = get_int(attributes, "TEXCOORD_2", -1);
 
+      primitive.extras = cast(*void, get_object(prim_parsed, "extras"));
+
       targets, has_targets := get_array(prim_parsed, "targets");
       if has_targets {
       	for target_parsed: targets {
-      		morph: GLTF_Morph_Target;
+      		morph_target: GLTF_Morph_Target;
 
-      		morph.position_accessor = get_int(target_parsed, "POSITION", -1);
-      		morph.normal_accessor = get_int(target_parsed, "NORMAL", -1);
-      		morph.tangent_accessor = get_int(target_parsed, "TANGENT", -1);
+      		morph_target.position_accessor = get_int(target_parsed, "POSITION", -1);
+      		morph_target.normal_accessor = get_int(target_parsed, "NORMAL", -1);
+      		morph_target.tangent_accessor = get_int(target_parsed, "TANGENT", -1);
 
-      		array_add(*primitive.morph_targets, morph);
+      		array_add(*primitive.targets, morph_target);
       	}
       }
     }
@@ -324,6 +332,7 @@ gltf_parse_string :: (gltf_buffer: string) -> GLTF_Data {
     image.uri         = get_string(image_parsed, "uri");
     image.mime_type   = get_string(image_parsed, "mimeType");
     image.data        = get_string(image_parsed, "data");
+    image.extras = cast(*void, get_object(image_parsed, "extras"));
 
     image.buffer_view = get_int(image_parsed, "bufferView", -1);
   }
@@ -354,6 +363,8 @@ gltf_parse_string :: (gltf_buffer: string) -> GLTF_Data {
     if has_min {
       sampler.min_filter = cast(GLTF_Min_Filter) parse_int(min_filter);
     }
+
+    sampler.extras = cast(*void, get_object(sampler_parsed, "extras"));
   }
 
 
@@ -368,6 +379,7 @@ gltf_parse_string :: (gltf_buffer: string) -> GLTF_Data {
     defer array_add(*data.animations, animation);
 
     animation.name = get_string(animation_sampler, "name");
+    animation.extras = cast(*void, get_object(animation_sampler, "extras"));
 
     samplers := get_array(animation_sampler, "samplers");
     for sampler_parsed: samplers {
@@ -422,6 +434,7 @@ gltf_parse_string :: (gltf_buffer: string) -> GLTF_Data {
     defer array_add(*data.materials, material);
 
     material.name = get_string(material_parsed, "name");
+    material.extras = cast(*void, get_object(material_parsed, "extras"));
 
     //
     // Metallic Roughness.
@@ -781,7 +794,7 @@ read_buffer_from_accessor :: (gltf_data: *GLTF_Data, accessor: GLTF_Accessor, li
 }
 
 // Arrays allocate memory
-get_extra :: (mesh: GLTF_Mesh, name: string, $T: Type) -> bool, T
+get_extra :: (extras: GLTF_Extras, name: string, $T: Type) -> bool, T
 {
 	#run {
 		SUPPORTED_TYPES :: Type.[
@@ -800,12 +813,12 @@ get_extra :: (mesh: GLTF_Mesh, name: string, $T: Type) -> bool, T
 	}
 
 	extra: T;
-	if !mesh.extras return false, extra;
+	if !extras return false, extra;
 
 	extra_json: JSON_Value;
 	success: bool;
 
-	extras_object := cast(*Table(string, JSON_Value), mesh.extras);
+	extras_object := cast(*Table(string, JSON_Value), extras);
 	success, extra_json = table_find(extras_object, name);
 	if !success return false, extra;
 
@@ -938,6 +951,8 @@ GLTF_Node :: struct {
   weights := -1;
   //The index of the light referenced by this node.
   light   := -1;
+  // Application-specific data.
+  extras : GLTF_Extras;
 }
 
 // A buffer points to binary geometry, animation, or skins.
@@ -950,6 +965,8 @@ GLTF_Buffer :: struct {
   byte_length : int;
   // Buffer's data once gltf_load_data was called.
   data : string;
+  // Application-specific data.
+  extras : GLTF_Extras;
 }
 
 // A view into a buffer generally representing a subset of the buffer.
@@ -966,6 +983,8 @@ GLTF_Buffer_View :: struct {
   // The hint representing the intended GPU buffer type
   // to use with this buffer view.
   target: GLTF_Target;
+  // Application-specific data.
+  extras : GLTF_Extras;
 }
 
 /// A typed view into a buffer view that contains raw binary data.
@@ -989,6 +1008,8 @@ GLTF_Accessor :: struct {
   // @todo: Would be better with tagged union for this.
   min : GLTF_Min_Max_Value;
   max : GLTF_Min_Max_Value;
+  // Application-specific data.
+  extras : GLTF_Extras;
 }
 
 // Refer to a minimum or maximum value.
@@ -1008,6 +1029,8 @@ GLTF_Scene :: struct {
   name  : string;
   // The indices of each root node.
   nodes : [..] int;
+  // Application-specific data.
+  extras : GLTF_Extras;
 }
 
 /// Joints and matrices defining a skin.
@@ -1021,6 +1044,8 @@ GLTF_Skin :: struct {
   skeleton := -1;
   // Indices of skeleton nodes, used as joints in this skin.
   joints : [..] int;
+  // Application-specific data.
+  extras : GLTF_Extras;
 }
 
 
@@ -1071,6 +1096,8 @@ GLTF_Metallic_Roughness :: struct {
     // The metallic-roughness texture.
     has_metallic_roughness     := false;
     metallic_roughness_texture : GLTF_Texture_Info;
+    // Application-specific data.
+  	extras : GLTF_Extras;
 }
 
 // The material appearance of a primitive.
@@ -1115,6 +1142,8 @@ GLTF_Material :: struct {
   // @Note: from khr_materials_transmission extension.
   has_transmission     := false;
   transmission_texture : GLTF_Texture_Info;
+  // Application-specific data.
+  extras : GLTF_Extras;
 }
 
 // The material’s alpha rendering mode enumeration specifying
@@ -1143,6 +1172,8 @@ GLTF_Texture :: struct {
   // When undefined, an extension or other mechanism should supply
   // an alternate texture source, otherwise behavior is undefined.
   source := -1;
+  // Application-specific data.
+  extras : GLTF_Extras;
 }
 
 /// Image data used to create a texture.
@@ -1159,6 +1190,8 @@ GLTF_Image :: struct {
   // The image's data calculated from the buffer/buffer_view.
   // Only there if glb file is loaded.
   data : string;
+  // Application-specific data.
+  extras : GLTF_Extras;
 }
 
 GLTF_Wrap_Mode :: enum u32 {
@@ -1191,6 +1224,8 @@ GLTF_Sampler :: struct {
   wrap_s     := GLTF_Wrap_Mode.REPEAT;
   // T (U) wrapping mode.
   wrap_t     := GLTF_Wrap_Mode.REPEAT;
+  // Application-specific data.
+  extras : GLTF_Extras;
 }
 
 GLTF_Attributes :: struct {
@@ -1312,6 +1347,8 @@ GLTF_Animation :: struct {
     // An animation sampler combines timestamps with a sequence of output
     // values and defines an interpolation algorithm.
     samplers: [..] GLTF_Animation_Sampler;
+    // Application-specific data.
+  	extras : GLTF_Extras;
 }
 
 // Geometry to be rendered with the given material.
@@ -1323,8 +1360,10 @@ GLTF_Primitive :: struct {
   indices_accessor := -1;
   // The index of the material to apply to this primitive when rendering.
   material := -1;
-
-  morph_targets: [..] GLTF_Morph_Target;
+  // An array of morph targets.
+  targets: [..] GLTF_Morph_Target;
+  // Application-specific data.
+  extras : GLTF_Extras;
 }
 
 // A set of primitives to be rendered.
@@ -1334,7 +1373,7 @@ GLTF_Mesh :: struct {
   name : string;
   // An array of primitives, each defining geometry to be rendered.
   primitives : [..] GLTF_Primitive;
-  // An opaque pointer to an array of JSON values.
+  // Application-specific data.
   extras : GLTF_Extras;
 }
 
@@ -1346,6 +1385,8 @@ GLTF_Asset :: struct {
   generator : string;
   // A copyright message suitable for display to credit the content creator.
   copyright : string;
+  // Application-specific data.
+  extras : GLTF_Extras;
 }
 
 // A camera’s projection.
@@ -1354,6 +1395,8 @@ GLTF_Asset :: struct {
 GLTF_Camera :: struct {
   name : string;
   type : enum { PERSPECTIVE; ORTHOGRAPHIC; };
+  // Application-specific data.
+  extras : GLTF_Extras;
 
   // A perspective camera containing properties to create a
   // perspective projection matrix.
@@ -1443,7 +1486,6 @@ GLTF_Light_Spot :: struct {
 }
 
 GLTF_Morph_Target :: struct {
-	name: string;
 	position_accessor := -1;
 	normal_accessor := -1;
 	tangent_accessor := -1;
