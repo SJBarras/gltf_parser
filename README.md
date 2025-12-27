@@ -1,4 +1,4 @@
-(This fork adds support for morph targets and extras, as well as keeping it up to date with new compiler releases)
+(This fork adds support for morph targets and extras, as well as keeping it up to date with new compiler releases. NOTE: morph targets dont support sparse accessors)
 
 # glTF parser for Jai codebase
 
